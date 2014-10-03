@@ -12,8 +12,7 @@ import argparse
 import pypyodbc
 import datetime
 import sqlite3
-#from fuzzywuzzy import fuzz
-#from fuzzywuzzy import process
+import nltk
 from pattern.it import parse, split, parsetree
 from pattern.it import pprint
 from pattern.metrics import similarity, levenshtein
@@ -28,13 +27,14 @@ CRITICAL = logging.CRITICAL
 WARN     = logging.WARN
 WARNING  = logging.WARNING
 NO = 0
+YES = -1
 me = "NAM"
 DsnProd         = 'DSN=Orange'
 restart         = False
 DsnTest         = 'DSN=OrangeTest'
 Dsn             = DsnTest
-cSql            = None
-cLite           = None
+global cSql, cLite, SqLite, MySql
+
 
 def CreateMemTableKeywords():
     try:
@@ -43,29 +43,8 @@ def CreateMemTableKeywords():
                             assettype   STRING,
                             language    STRING,
                             keyword     STRING,
-                            operatore   STRING,
-                            tipologia1  STRING,
-                            tipologia2  STRING,
-                            tipologia3  STRING,
-                            tipologia4  STRING,
-                            tipologia5  STRING,
-                            replacewith STRING,
-                            numwords    INTEGER
-        );"""
-        SqLite.executescript(cmd_create_table)
-        return True
-    except Exception as err:
-        #log(ERROR, err)
-        return False
-
-
-def dbCreateMemTableKeywords():
-    try:
-        cmd_create_table = """CREATE TABLE if not exists 
-                  keywords (
-                            assettype   STRING,
-                            language    STRING,
-                            keyword     STRING,
+                            pos         STRING,
+                            mypos       STRING,
                             operatore   STRING,
                             tipologia1  STRING,
                             tipologia2  STRING,
@@ -81,8 +60,7 @@ def dbCreateMemTableKeywords():
         log(ERROR, err)
         return False
 
-
-def dbAAsset(Asset, AssetMatch, AssetRef):
+def AAsset(Asset, AssetMatch, AssetRef):
     try:
         if AssetMatch == 0:   # devo inserire me stesso
             cSql.execute("select * from asset where asset = ?", ([Asset]))
@@ -147,7 +125,8 @@ def CopyKeywordsInMemory():
         assettype   = k['assettype']
         language    = k['language']
         keyword     = k['keyword']
-        operatore   = k['operatore']
+        pos         = k['pos']
+        mypos       = k['mypos']
         tipologia1  = k['tipologia1']
         tipologia2  = k['tipologia2']
         tipologia3  = k['tipologia3']
@@ -156,12 +135,12 @@ def CopyKeywordsInMemory():
         replacewith = k['replacewith']
         kwdnumwords = k['kwdnumwords']
         numwords    = len(keyword.split())
-        cLite.execute("insert into keywords (assettype, language, keyword, operatore,tipologia1,tipologia2,replacewith,numwords) values (?, ?, ?, ?, ?, ?, ?, ?)",
-                                        (assettype, language, keyword, operatore,tipologia1,tipologia2,replacewith,numwords))
+        cLite.execute("insert into keywords (assettype, language, keyword, pos, mypos,tipologia1,tipologia2,replacewith,numwords) values (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                                            (assettype, language, keyword, pos, mypos,tipologia1,tipologia2,replacewith,numwords))
     return
 
 def ParseArgs():
-    testrun = debug = resetnames = False
+    testrun = debug = nomi = genera = False
     Dsn = ''
     parser = argparse.ArgumentParser()
     parser.add_argument('-test', action='store_true', default=False,
@@ -170,9 +149,12 @@ def ParseArgs():
     parser.add_argument('-debug', action='store_true', default='',
                     dest='debug',
                     help="Dump tabelle interne su Db")
-    parser.add_argument('-resetnames', action='store_true', default='',
-                    dest='resetnames',
-                    help="Inizializza tutti i nomi standard prima di una nuova standardizzazione dei nomi. Esclusi i nomi modificati a mano")
+    parser.add_argument('-nomi', action='store_true', default='',
+                    dest='nomi',
+                    help="Semplifica i nomi degli asset")
+    parser.add_argument('-genera', action='store_true', default='',
+                    dest='genera',
+                    help="Genera/aggiorna la tabella dei nomi degli asset")
 
     args = parser.parse_args()
     if args.test:
@@ -185,12 +167,14 @@ def ParseArgs():
         print("RUN EFFETTIVO")
     if args.debug:
         debug = True
-    if args.resetnames:
-        resetnames = True
-    
+    if args.genera:
+        genera = True
+    if args.nomi:
+        nomi = True
+   
     Args = args
 
-    return testrun, Dsn, debug, resetnames
+    return testrun, Dsn, debug, genera, nomi
 
 def RunIdCreate(RunType):
     try:
@@ -203,10 +187,9 @@ def RunIdCreate(RunType):
         runid = run[0]    
         return runid
     except Exception as err:        
-        #log(ERROR, err)
         return False
 
-def dbAssetTag(Asset, Ttag, tagname):
+def AssetTag(Asset, Ttag, tagname):
      
     try:
         # cancella e riscrive la classificazione dell'asset     
@@ -314,7 +297,6 @@ def InsertWTag(nomeoriginale, keyword, lunghezza, tag):
     if a is None:
         # inserisce asset con info standardizzate     
         cSql.execute("Insert into W_Tag (nomeoriginale, keyword, lunghezza, pos) values (?, ?, ?, ?)" , (nomeoriginale, keyword, lunghezza, tag))
-
     return
 
 def InsertTag(keyword, tag):
@@ -349,26 +331,11 @@ def controlla(name, frasecompleta, lunghezza):
     
     return False
 
-def LoadCustomTagging():    
-    #import nltk.tag, nltk.data
-    #defaulW_Tagger = nltk.data.load(nltk.tag._POS_TAGGER)
-    #cSql.execute("select * from T_CustomTag where nomeoriginale = ? and  keyword = ? and pos = ?", (nomeoriginale, keyword, tag))
-    #a = cSql.fetchone()
 
-    #model = {'select': 'VB'}
-    #tagger = nltk.tag.UnigramTagger(model=model, backoff=defaulW_Tagger)
-    return
-
-def Main():
+def Names_Main():
+    # legge tutti i nomi ed e li semplifica 
     try:
-        global cSql, cLite, SqLite, MySql
-        testrun = Dsn = debug = resetnames = ''
-        testrun, Dsn, debug, resetnames = ParseArgs()
-        # apri connessione e cursori, carica keywords in memoria
-        MySql = pypyodbc.connect(Dsn)
-        cSql = MySql.cursor()
-        SqLite = sqlite3.connect(':memory:')
-        cLite = SqLite.cursor()
+        tagger = None
         RunId = RunIdCreate(me)
         rc = SetLogger(me, RunId, restart)      
         if not rc:
@@ -377,15 +344,130 @@ def Main():
         #log(INFO, Args)
         N_Ass = 0
 
-        if resetnames == True:
-            cSql.execute("Delete * from W_Tag")
-
-        #if debug:
-        #   cSql.execute("Delete from Debug_Names")
- 
+        msg=('RUN %s: NAMES, reading...' % (RunId))
+        log(INFO, msg)
         # creo la tabella in memoria
         rc = CreateMemTableKeywords()
-        rc = CopyKeywordsInMemory()
+        #rc = CopyKeywordsInMemory()
+        tagger = Names_LoadCustomTagging()
+
+        # seleziono le righe da esaminare (aggiungere restart?)
+        cSql.execute("Select * from QAddress where NameDoNotTouch = ? and NameSimplified = ?", (NO, NO))
+        rows = cSql.fetchall()
+        T_Ass = len(rows)
+        msg=('RUN %s: NAMES, %s Assets' % (RunId, T_Ass))
+        log(INFO, msg)
+        t1 = time.clock()
+        for row in rows:
+            Ttag = []
+            cuc = []
+            asset = row['asset']
+            name = row['name']
+            assettype = row['assettype']
+            country = row['country']
+            lang = row['countrylanguage']
+            simplename = Names_Change(tagger, asset, name, assettype, lang) 
+            if simplename != name:
+               log(INFO, name+"---"+simplename)
+               cSql.execute("Update Asset set NameSimple = ?, NameSimplified = ? where Asset = ?", (simplename, YES, asset))
+            N_Ass = N_Ass + 1
+        t2 = time.clock()
+        print(round(t2-t1, 3))
+        # chiudi DB
+        MySql.close()
+        SqLite.close()
+
+    except Exception as err:
+        log(ERROR, err)
+        return False
+
+def Names_LoadCustomTagging():    
+
+    import nltk.tag, nltk.data
+    model = {}
+    defaulW_Tagger = nltk.data.load(nltk.tag._POS_TAGGER)
+    cSql.execute("select * from T_Tag where  mypos <> ''")
+    rows = cSql.fetchall()
+    for row in rows:
+        assettype   = row['assettype']
+        language    = row['language']
+        keyword     = row['keyword']
+        mypos       = row['mypos']
+        operatore   = row['operatore']
+        tipologia1  = row['tipologia1']
+        tipologia2  = row['tipologia2']
+        tipologia3  = row['tipologia3']
+        tipologia4  = row['tipologia4']
+        tipologia5  = row['tipologia5']
+        replacewith = row['replacewith']
+        kwdnumwords = len(keyword.split())
+
+        cLite.execute("insert into keywords (assettype, language, keyword, operatore,tipologia1,tipologia2,replacewith) values (?, ?, ?, ?, ?, ?, ?)",
+                                            (assettype, language, keyword, operatore,tipologia1,tipologia2,replacewith))
+        model[keyword] = mypos   # costruisci il tagger per classificare le parole da trattare
+
+    tagger = nltk.tag.UnigramTagger(model=model, backoff=defaulW_Tagger)
+    return tagger
+
+def Names_Change(tagger, asset, name, assettype, lang):
+    togli = '!"#$\'()*+,-./:;<=>?@[\\]^_`{|}~'
+    typ     = []
+    newname = []
+    cuc     = []
+    t = nltk.word_tokenize(name)
+    for i in tagger.tag(t):
+        word = i[0]
+        ctag = i[1]
+        if ctag == 'DEL' or ctag == 'RPL':
+            cLite.execute("SELECT * from keywords where keyword = ? and assettype = ? and language = ?", (i[1], assettype, lang))
+            check = cLite.fetchone()
+            if check is None:
+                log(ERROR, "KWD non trovata in tabella keyword")
+                continue
+            xtyp1       = parola[5]
+            xtyp2       = parola[6]
+            xcuc1       = parola[7]
+            xcuc2       = parola[8]
+            xcuc3       = parola[9]
+            replacew    = parola[10]
+            if xtyp1 is not None:
+                typ.append(xtyp1)
+            if xtyp2 is not None:
+                typ.append(xtyp2)
+            if xcuc1 is not None:
+                cuc.append(xcuc1)
+            if xcuc2 is not None:
+                cuc.append(xcuc2)
+            if xcuc3 is not None:
+                cuc.append(xcuc3)
+            continue
+        if ctag == 'DEL':
+            continue
+        elif ctag == 'RPL':
+            newname.append(replacew)
+        elif ctag not in togli: 
+            newname.append(word)  
+    rc = AssetTag(asset, typ, "Tipologia")
+    rc = AssetTag(asset, cuc, "Cucina")
+    return " ".join(newname)
+
+
+def ExtractName():
+    # legge tutti i nomi ed estrae tutte le keyword, le registra nella tabella T_Tag, che viene poi
+    # letta per trattare opportunamente i nomi
+    # da eseguirsi una tantum
+    try:
+        RunId = RunIdCreate(me)
+        rc = SetLogger(me, RunId, restart)      
+        if not rc:
+            log(ERROR, "SetLogger errato")
+     
+        #log(INFO, Args)
+        N_Ass = 0
+
+        # creo la tabella in memoria
+        rc = CreateMemTableKeywords()
+        #rc = CopyKeywordsInMemory()
         # seleziono le righe da esaminare (aggiungere restart?)
         cSql.execute("Select * from QAddress")
         rows = cSql.fetchall()
@@ -436,15 +518,11 @@ def Main():
                                 cenomeproprio = False
                                 frasecompleta = ' '.join(frase)
                                 rc = controlla(name, frasecompleta, len(frase))
-                                InsertWTag(name, frasecompleta, len(frase), "YYY")
+                                InsertWTag(name, frasecompleta, len(frase), "YYY")  # inserisce la frase che potrebbe essere cancellata
                                 cSql.commit()
                             frase = []
                             ce = False
 
-                    #if debug:
-                    #    rc = DumpNames(asset, name, simplename)
-                    #rc = dbAssetTag(asset, tag, "Tipologia")
-                    #rc = dbAssetTag(asset, cuc, "Cucina")
             N_Ass = N_Ass + 1
         t2 = time.clock()
         print(round(t2-t1, 3))
@@ -456,13 +534,193 @@ def Main():
         log(ERROR, err)
         return False
 
-if __name__ == "__main__":       
+
+
+def StdAsset(Asset, Mode):
+    if gL.trace: gL.log(gL.DEBUG)   
+    try:
+        t1 = time.clock()
+        tabratio = []
+        # il record corrente
+        gL.cSql.execute("select * from qaddress where asset =  ?", ([Asset]))
+        Curasset = gL.cSql.fetchone() 
+        if not Curasset:
+            gL.log("ERROR", "Asset non trovato in tabella")
+            return False
+        if Mode == "NEW":
+            if Curasset['aasset'] != 0:   # se e' gia'  stato battezzato non lo esamino di nuovo
+                return Asset, Curasset['aasset']
+            # tutti i record dello stesso tipo e paese ma differenti source, e che hanno gia  un asset di riferimento (aasset)
+        gL.cLite.execute("select * from MemAsset where Asset <> ? and Source <> ? and Country = ? and Assettype = ? and AAsset <> 0", (Asset, Curasset['source'], Curasset['country'], Curasset['assettype']))
+        rows  = gL.cLite.fetchall()     
+        if len(rows) == 0:   # non ce ne sono
+            return 0,0   #inserisco l'asset corrente
+
+        for j in range (0, len(rows)):
+
+            name = cfrname = city = cfrcity = street = cfrstreet = zip = cfrzip = ''
+            gblratio = 0; quanti = 0; 
+
+            asset           = str(rows[j][0])
+            country         = str(rows[j][1])
+            aasset          = str(rows[j][2])
+            name            = str(rows[j][3])
+            source          = str(rows[j][4])
+            namesimple      = str(rows[j][5])
+            assettype       = str(rows[j][6])
+            addrstreet      = str(rows[j][7])
+            addrcity        = str(rows[j][8])
+            addrzip         = str(rows[j][9])  # viene caricata come intero ?
+            addrcounty      = str(rows[j][10])
+            addrphone       = str(rows[j][11])
+            addrwebsite     = str(rows[j][12])
+            addrregion      = str(rows[j][13])
+            formattedaddress= str(rows[j][14])
+            namesimplified  = str(rows[j][15])
+
+            # se hanno esattamente stesso sito web o telefono o indirizzo sono uguali
+            if Curasset['addrwebsite'] and addrwebsite and (Curasset['addrwebsite'] == addrwebsite):
+                return asset, aasset
+            if Curasset['addrphone'] and addrphone and (Curasset['addrphone'] == addrphone):
+                return asset, aasset
+            if Curasset['addrcity'] and Curasset['addrroute']:   # se c'e' almeno la strada e la citta', se l'indirizzo è uguale sono uguali
+                if Curasset['formattedaddress'] and formattedaddress and (Curasset['formattedaddress'] == formattedaddress):
+                    return asset, aasset
+            # se non hanno lo stesso paese, regione, provincia, salto
+            if Curasset['country'] and country and (Curasset['country'] != country):
+                continue
+            if Curasset['addrregion'] and addrregion and (Curasset['addrregion'] != addrregion):
+                continue
+
+            nameratio=nameratio_ratio=nameratio_set=nameratio_partial=0           
+            streetratio=streetratio_set=streetratio_partial=streetratio_ratio=0
+            cityratio_ratio=cityratio_set=cityratio_partial=cityratio=0             
+            webratio=phoneratio=zipratio=0
+            # uso il nome standard
+            curname = Curasset['namesimple'].title()
+            cfrname = namesimple.title()            
+            #    curname = Curasset['name'].title()
+            #    cfrname = name.title()            
+            nameratio_ratio = fuzz.ratio(curname, cfrname)
+            nameratio_partial = fuzz.partial_ratio(curname, cfrname)
+            nameratio_set = fuzz.token_set_ratio(curname, cfrname)
+            nameratio = nameratio_set+ nameratio_partial + nameratio_ratio
+            if nameratio_ratio > 50:
+                quanti = quanti + 1
+            else:
+                continue
+                #print(name+","+cfrname+","+str(nameratio)+","+str(fuzz.ratio(name, cfrname))+","+str(fuzz.partial_ratio(name, cfrname))+","+str(fuzz.token_sort_ratio(name, cfrname))+","+str(fuzz.token_set_ratio(name, cfrname)))
+            if Curasset['addrcity'] and addrcity:
+                city = Curasset['addrcity'].title() 
+                cfrcity = addrcity.title()
+                cityratio_ratio = fuzz.ratio(city, cfrcity)
+                cityratio_partial = fuzz.partial_ratio(city, cfrcity)
+                cityratio_set = fuzz.token_set_ratio(city, cfrcity)
+                cityratio = cityratio_set + cityratio_partial + cityratio_ratio
+                if cityratio > 50:
+                    quanti = quanti + 1                
+                else:
+                    cityratio = 0
+            if Curasset['addrstreet'] and addrstreet:
+                street = Curasset['addrstreet'].title()             
+                cfrstreet = addrstreet.title()                               
+                streetratio_ratio = fuzz.ratio(street, cfrstreet)
+                streetratio_partial = fuzz.partial_ratio(street, cfrstreet)
+                streetratio_set = fuzz.token_set_ratio(street, cfrstreet)
+                streetratio = streetratio_set + streetratio_partial + streetratio_ratio
+                if streetratio > 50:
+                    quanti = quanti + 1 
+                else:
+                    streetratio = 0 
+            if Curasset['website'] and website:
+                web = Curasset['website'].title() 
+                cfrweb = website.title()                
+                webratio = fuzz.ratio(web, cfrweb)
+                if webratio > 50:
+                    quanti = quanti + 1
+                else:
+                    webratio = 0
+            if Curasset['addrphone'] and addrphone:
+                pho = Curasset['addrphone'].title() 
+                cfrpho = addrphone.title()                
+                phoneratio = fuzz.ratio(pho, cfrpho)
+                if phoneratio > 50:
+                    quanti = quanti + 1
+                else:
+                    phoneratio = 0
+            if Curasset['addrzip'] and addrzip:
+                zip = addrzip.title()
+                cfrzip = addrzip.title()
+                zipratio = fuzz.ratio(zip, cfrzip)
+                if zipratio > 50:
+                    quanti = quanti + 1
+                else:
+                    zipratio = 0
+            if nameratio > 100:  # da modificare quando ho capito come fare
+                # peso i match 0,6 sufficiente, 
+                namepeso = 2
+                streetpeso = 1.5
+                citypeso = 1
+                zippeso = 1
+                webpeso = 1
+                phonepeso = 1
+                gblratio =( ((nameratio     * namepeso) +             \
+                             (streetratio   * streetpeso) +           \
+                             (cityratio     * citypeso) +             \
+                             (zipratio      * zippeso) +              \
+                             (webratio      * webpeso) +              \
+                             (phoneratio    * phonepeso))             \
+                             /
+                             (quanti)  )                     
+                tabratio.append((round(gblratio,2), Curasset['asset'], curname, cfrname, asset, aasset, round(nameratio,2), round(streetratio,2), round(cityratio,2), round(zipratio,2), round(webratio,2), round(phoneratio,2), round(nameratio_ratio,2), round(nameratio_partial,2), round(nameratio_set,2)))
+            
+        if len(tabratio) > 0:
+            tabratio.sort(reverse=True, key=lambda tup: tup[0])
+            if gL.debug:
+                gL.DumpTabratio(tabratio)
+            if tabratio[0][0] > 400:   # global                
+                msg = ("[ASSET MATCH] [%s-%s] [%s-%s] [%s]" % (tabratio[0][3], tabratio[0][1], tabratio[0][4], tabratio[0][2], tabratio[0][0]))
+                gL.log(gL.WARNING, msg)
+                t2 = time.clock()
+                print(round(t2-t1, 3))
+                return tabratio[0][3], tabratio[0][4]  # Asset, AAsset
+        t2 = time.clock()
+        print(round(t2-t1, 3))
+        return 0,0
+
+    except Exception as err:
+        gL.log(gL.ERROR, err)
+        return False
+
+
+
+def Main():
+    if genera:
+        rc = ExtractName()
+        if not rc:
+            return False
+    if nomi:
+        rc = Names_Main()
+        if not rc:
+            return False
+    return True
+
+if __name__ == "__main__":
+    global cSql, cLite, SqLite, MySql
+    testrun = Dsn = debug = nomi = genera = ''
+    testrun, Dsn, debug, genera, nomi = ParseArgs()
+
+    # apri connessione e cursori, carica keywords in memoria
+    MySql = pypyodbc.connect(Dsn)
+    cSql = MySql.cursor()
+    SqLite = sqlite3.connect(':memory:')
+    cLite = SqLite.cursor()
     rc = Main()
     if not rc:
-        #log(ERROR, "Run terminato in modo errato")        
+        log(ERROR, "Run terminato in modo errato")        
         sys.exit(12)
     else:
-        #log(INFO, "Run terminato in modo corretto")        
+        log(INFO, "Run terminato in modo corretto")        
         sys.exit(0)
 
 
@@ -483,3 +741,4 @@ if __name__ == "__main__":
 #;
 #(
 #)
+
