@@ -3,6 +3,7 @@
 # @author: mda
 #!/usr/local/bin/python
 import sys
+import string
 sys.path.append("c:/Orange/")
 import sys
 import inspect
@@ -18,6 +19,8 @@ from pattern.it import pprint
 from pattern.metrics import similarity, levenshtein
 import time
 import logging
+import progressbar
+
 INFO     = logging.INFO
 CRITICAL = logging.CRITICAL
 FATAL    = logging.FATAL
@@ -130,11 +133,10 @@ def CopyKeywordsInMemory():
         tipologia1  = k['tipologia1']
         tipologia2  = k['tipologia2']
         tipologia3  = k['tipologia3']
-        tipologia4  = k['tipologia4']
-        tipologia5  = k['tipologia5']
+        cucina1     = k['cucina1']
+        cucina2     = k['cucina2']
+        cucina3     = k['cucina3']
         replacewith = k['replacewith']
-        kwdnumwords = k['kwdnumwords']
-        numwords    = len(keyword.split())
         cLite.execute("insert into keywords (assettype, language, keyword, pos, mypos,tipologia1,tipologia2,replacewith,numwords) values (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                                             (assettype, language, keyword, pos, mypos,tipologia1,tipologia2,replacewith,numwords))
     return
@@ -291,7 +293,7 @@ def log(level, *message):
             for line in stack_trace:
                 logging.error(line.replace("\n",""))
 
-def InsertWTag(nomeoriginale, keyword, lunghezza, tag):
+def Genera_InsertWTag(nomeoriginale, keyword, lunghezza, tag):
     cSql.execute("select * from W_Tag where nomeoriginale = ? and  keyword = ? and pos = ?", (nomeoriginale, keyword, tag))
     a = cSql.fetchone()
     if a is None:
@@ -299,8 +301,8 @@ def InsertWTag(nomeoriginale, keyword, lunghezza, tag):
         cSql.execute("Insert into W_Tag (nomeoriginale, keyword, lunghezza, pos) values (?, ?, ?, ?)" , (nomeoriginale, keyword, lunghezza, tag))
     return
 
-def InsertTag(keyword, tag):
-    cSql.execute("select * from T_Tag where keyword = ? and pos = ?", (keyword, tag))
+def Genera_InsertTag(keyword, tag):
+    cSql.execute("select * from T_Tag where keyword = ?", ([keyword]))
     a = cSql.fetchone()
     if a is None:
         # inserisce asset con info standardizzate     
@@ -352,12 +354,13 @@ def Names_Main():
         tagger = Names_LoadCustomTagging()
 
         # seleziono le righe da esaminare (aggiungere restart?)
-        cSql.execute("Select * from QAddress where NameDoNotTouch = ? and NameSimplified = ?", (NO, NO))
+        cSql.execute("Select * from QAddress where NameDoNotTouch = ?", ([NO]))
         rows = cSql.fetchall()
         T_Ass = len(rows)
         msg=('RUN %s: NAMES, %s Assets' % (RunId, T_Ass))
         log(INFO, msg)
         t1 = time.clock()
+        bar = progressbar.ProgressBar(maxval=T_Ass,widgets=[progressbar.Bar('*', '[', ']'), ' ', progressbar.Percentage()])
         for row in rows:
             Ttag = []
             cuc = []
@@ -367,15 +370,20 @@ def Names_Main():
             country = row['country']
             lang = row['countrylanguage']
             simplename = Names_Change(tagger, asset, name, assettype, lang) 
+            if not simplename:
+                return False
             if simplename != name:
-               log(INFO, name+"---"+simplename)
+               log(DEBUG, name+"---"+simplename)
                cSql.execute("Update Asset set NameSimple = ?, NameSimplified = ? where Asset = ?", (simplename, YES, asset))
             N_Ass = N_Ass + 1
+            bar.update(N_Ass)
         t2 = time.clock()
         print(round(t2-t1, 3))
         # chiudi DB
         MySql.close()
         SqLite.close()
+        bar.finish()
+        return True
 
     except Exception as err:
         log(ERROR, err)
@@ -409,50 +417,88 @@ def Names_LoadCustomTagging():
     tagger = nltk.tag.UnigramTagger(model=model, backoff=defaulW_Tagger)
     return tagger
 
+def Names_Stdze(name):
+    try:
+        #todelete = '!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~‘’“”–'
+        todelete = '!"#$%()*+,-./:;<=>@[\\]^_`{|}~'
+        stdnam = []; n = 0; 
+        for i in name:
+            if i not in todelete:
+                stdnam.append(i)
+                n = 1
+        if n > 0:
+            newnam = "".join(stdnam)
+        else:
+            newnam = "-"
+        return newnam
+
+    except Exception as err:
+        log(ERROR, err)
+        return False
+
+
+
 def Names_Change(tagger, asset, name, assettype, lang):
-    togli = '!"#$\'()*+,-./:;<=>?@[\\]^_`{|}~'
-    typ     = []
-    newname = []
-    cuc     = []
-    t = nltk.word_tokenize(name)
-    for i in tagger.tag(t):
-        word = i[0]
-        ctag = i[1]
-        if ctag == 'DEL' or ctag == 'RPL':
-            cLite.execute("SELECT * from keywords where keyword = ? and assettype = ? and language = ?", (i[1], assettype, lang))
-            check = cLite.fetchone()
-            if check is None:
-                log(ERROR, "KWD non trovata in tabella keyword")
+    try:
+        if len(name) == 0:
+            return "-"
+        togli = '!"#$\'()*+,-./:;<=>?@[\\]^_`{|}~'
+        typ     = []
+        newname = []
+        cuc     = []
+        stdname = Names_Stdze(name)
+        if not stdname:
+            log(ERROR, "Error in stdze " + name)
+            return False
+
+        t = nltk.word_tokenize(stdname)
+        for i in tagger.tag(t):
+            word = i[0]
+            ctag = i[1]
+            if ctag == 'DEL' or ctag == 'RPL':
+                cLite.execute("SELECT * from keywords where keyword = ? and assettype = ? and language = ?", (word, assettype, lang))
+                check = cLite.fetchone()
+                if check is None:
+                    msg = "Kwd %s non trovata in tabella" % (i[1])
+                    log(ERROR, msg)
+                    continue
+                xtyp1       = check[5]
+                xtyp2       = check[6]
+                xtyp3       = check[7]
+                xcuc1       = check[8]
+                xcuc2       = check[9]
+                xcuc3       = check[10]
+                replacew    = check[11]
+                if xtyp1 is not None:
+                    typ.append(xtyp1)
+                if xtyp2 is not None:
+                    typ.append(xtyp2)
+                if xtyp3 is not None:
+                    typ.append(xtyp3)
+                if xcuc1 is not None:
+                    cuc.append(xcuc1)
+                if xcuc2 is not None:
+                    cuc.append(xcuc2)
+                if xcuc3 is not None:
+                    cuc.append(xcuc3)
                 continue
-            xtyp1       = parola[5]
-            xtyp2       = parola[6]
-            xcuc1       = parola[7]
-            xcuc2       = parola[8]
-            xcuc3       = parola[9]
-            replacew    = parola[10]
-            if xtyp1 is not None:
-                typ.append(xtyp1)
-            if xtyp2 is not None:
-                typ.append(xtyp2)
-            if xcuc1 is not None:
-                cuc.append(xcuc1)
-            if xcuc2 is not None:
-                cuc.append(xcuc2)
-            if xcuc3 is not None:
-                cuc.append(xcuc3)
-            continue
-        if ctag == 'DEL':
-            continue
-        elif ctag == 'RPL':
-            newname.append(replacew)
-        elif ctag not in togli: 
-            newname.append(word)  
-    rc = AssetTag(asset, typ, "Tipologia")
-    rc = AssetTag(asset, cuc, "Cucina")
-    return " ".join(newname)
+            if ctag == 'DEL':
+                continue
+            elif ctag == 'RPL':
+                newname.append(replacew)
+            elif ctag not in togli: 
+                newname.append(word)  
+        rc = AssetTag(asset, typ, "Tipologia")
+        rc = AssetTag(asset, cuc, "Cucina")
+        return " ".join(newname)
+
+    except Exception as err:
+        log(ERROR, err)
+        return False
 
 
-def ExtractName():
+
+def Genera_ExtractName():
     # legge tutti i nomi ed estrae tutte le keyword, le registra nella tabella T_Tag, che viene poi
     # letta per trattare opportunamente i nomi
     # da eseguirsi una tantum
@@ -475,6 +521,7 @@ def ExtractName():
         msg=('RUN %s: NAMES, %s Assets' % (RunId, T_Ass))
         log(INFO, msg)
         t1 = time.clock()
+        bar = progressbar.ProgressBar(maxval=T_Ass,widgets=[progressbar.Bar('*', '[', ']'), ' ', progressbar.Percentage()])
         for row in rows:
             Ttag = []
             cuc = []
@@ -486,7 +533,7 @@ def ExtractName():
             country = row['country']
             lang = row['countrylanguage']
             fix = row['namedonottouch']
-
+            bar.update(N_Ass)
             if namesimple == None or namesimple == '' or namesimple.isspace(): # se simple e' vuoto ci copio il nome
                 simplename = name.title()
                 cSql.execute("Update Asset set NameSimple = ?, NameSimplified = ? where Asset = ?", (simplename, NO, asset))
@@ -495,13 +542,14 @@ def ExtractName():
                 frase = []
                 ce = False
                 msg = (str(N_Ass) + "(" + str(T_Ass) +") - " + name )
-                log(INFO, msg)
+                log(DEBUG, msg)
                 s = parsetree(name) 
                 if len(s.words) == 1:   # c'e' solo una parola, non viene trattato
                     continue
                 for word in s.words:
-                    InsertTag(word.string, word.tag)
-                    cSql.commit()
+                    if word.string not in string.punctuation:
+                        Genera_InsertTag(word.string, word.tag)
+                        cSql.commit()
                 for sentence in s.sentences:
                     for chunk in sentence.pnp:   # prepositional noun phrase
                         ce = False
@@ -518,23 +566,23 @@ def ExtractName():
                                 cenomeproprio = False
                                 frasecompleta = ' '.join(frase)
                                 rc = controlla(name, frasecompleta, len(frase))
-                                InsertWTag(name, frasecompleta, len(frase), "YYY")  # inserisce la frase che potrebbe essere cancellata
+                                Genera_InsertWTag(name, frasecompleta, len(frase), "YYY")  # inserisce la frase che potrebbe essere cancellata
                                 cSql.commit()
                             frase = []
                             ce = False
 
             N_Ass = N_Ass + 1
         t2 = time.clock()
+        bar.finish()
         print(round(t2-t1, 3))
         # chiudi DB
         MySql.close()
         SqLite.close()
+        return True
 
     except Exception as err:
         log(ERROR, err)
         return False
-
-
 
 def StdAsset(Asset, Mode):
     if gL.trace: gL.log(gL.DEBUG)   
@@ -692,11 +740,10 @@ def StdAsset(Asset, Mode):
         gL.log(gL.ERROR, err)
         return False
 
-
-
 def Main():
+
     if genera:
-        rc = ExtractName()
+        rc = Genera_ExtractName()
         if not rc:
             return False
     if nomi:
