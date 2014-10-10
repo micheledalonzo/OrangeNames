@@ -551,7 +551,7 @@ def Genera_ExtractName():
         # seleziono le righe da esaminare (aggiungere restart?)
         msg=('RUN %s: NAMES, reading...' % (RunId))
         log(INFO, msg)
-        cMySql.execute("Select * from QAddress where Asset < 10000")
+        cMySql.execute("Select * from QAddress")
         rows = cMySql.fetchall()
         T_Ass = len(rows)
         msg=('RUN %s: NAMES, %s Assets' % (RunId, T_Ass))
