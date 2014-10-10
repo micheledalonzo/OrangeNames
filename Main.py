@@ -4,16 +4,15 @@
 #!/usr/local/bin/python
 import sys
 import string
-sys.path.append("c:/Orange/")
-import sys
 import inspect
 import traceback
 import linecache
 import argparse
 import pypyodbc
+import pymysql
 import datetime
 import sqlite3
-import nltk
+import nltk 
 from pattern.it import parse, split, parsetree
 from pattern.it import pprint
 from pattern.metrics import similarity, levenshtein
@@ -36,10 +35,11 @@ DsnProd         = 'DSN=Orange'
 restart         = False
 DsnTest         = 'DSN=OrangeTest'
 Dsn             = DsnTest
-global cSql, cLite, SqLite, MySql
+global cMsAcc, cLite, SqLite, MsAcc, cMySql, MySql
 
 
 def CreateMemTableKeywords():
+    if trace: log(DEBUG)  
     try:
         cmd_create_table = """CREATE TABLE if not exists 
                   keywords (
@@ -64,20 +64,21 @@ def CreateMemTableKeywords():
         return False
 
 def AAsset(Asset, AssetMatch, AssetRef):
+    if trace: log(DEBUG)   
     try:
         if AssetMatch == 0:   # devo inserire me stesso
-            cSql.execute("select * from asset where asset = ?", ([Asset]))
+            cMsAcc.execute("select * from asset where asset = ?", ([Asset]))
              # inserisce asset con info standardizzate     
-            cSql.execute("Insert into AAsset (Updated) values (?)" , ([RunDate]))
-            cSql.execute("SELECT @@IDENTITY")  # recupera id autonum generato
-            lstrec = cSql.fetchone()
+            cMsAcc.execute("Insert into AAsset (Updated) values (?)" , ([RunDate]))
+            cMsAcc.execute("SELECT @@IDENTITY")  # recupera id autonum generato
+            lstrec = cMsAcc.fetchone()
             if lstrec is None:
                 raise Exception("Errore get autonum")
             AAsset = int(lstrec[0])
-            cSql.execute("Update Asset set AAsset=? where Asset=?", (AAsset, Asset))
+            cMsAcc.execute("Update Asset set AAsset=? where Asset=?", (AAsset, Asset))
         else:
             AAsset = AssetRef
-            cSql.execute("Update Asset set AAsset=? where Asset=?", (AssetRef, Asset))  # ci metto il record di rif 
+            cMsAcc.execute("Update Asset set AAsset=? where Asset=?", (AssetRef, Asset))  # ci metto il record di rif 
         
         return AAsset
 
@@ -86,29 +87,29 @@ def AAsset(Asset, AssetMatch, AssetRef):
         return False
 
 def CopyAssetInMemory():
-    
+    if trace: log(DEBUG)   
     try:
         log(INFO, "Loading assets....")
-        cSql.execute("Select * from QAddress order by Name")
-        memassets = cSql.fetchall()
+        cMySql.execute("Select * from QAddress order by Name")
+        memassets = cMySql.fetchall()
         count = 0
         for asset in memassets:
             count = count + 1
-            AAsset      = asset['aasset']
-            Asset       = asset['asset']
-            Country     = asset['country']
-            Source      = asset['source']
-            Name        = asset['name']
-            NameSimple  = asset['namesimple']
-            NameSimplified = asset['namesimplified']
-            AddrStreet  = asset['addrstreet']
-            AddrCity    = asset['addrcity']
-            AddrZIP     = asset['addrzip']
-            AddrCounty  = asset['addrcounty']
-            AddrPhone   = asset['addrphone']
-            AddrWebsite = asset['addrwebsite']
-            Assettype   = asset['assettype']
-            AddrRegion  = asset['addrregion']
+            AAsset      = asset['AAsset']
+            Asset       = asset['Asset']
+            Country     = asset['Country']
+            Source      = asset['Source']
+            Name        = asset['Name']
+            NameSimple  = asset['NameSimple']
+            NameSimplified = asset['NameSimplified']
+            AddrStreet  = asset['AddrStreet']
+            AddrCity    = asset['AddrCity']
+            AddrZIP     = asset['AddrZIP']
+            AddrCounty  = asset['AddrCounty']
+            AddrPhone   = asset['AddrPhone']
+            AddrWebsite = asset['AddrWebsite']
+            Assettype   = asset['AssetType']
+            AddrRegion  = asset['AddrRegion']
             FormattedAddress =  asset['formattedaddress']
             cLite.execute("insert into MemAsset \
                             (aasset, asset, assettype, country, name, namesimple, namesimplified, addrstreet, addrcity, addrzip, addrcounty, addrphone, addrwebsite, addrregion, formattedaddress, source) \
@@ -121,28 +122,28 @@ def CopyAssetInMemory():
         return False
 
 def CopyKeywordsInMemory():
-    
-    cSql.execute("Select * from T_Tag order by keyword")
-    ks = cSql.fetchall()
+    if trace: log(DEBUG)   
+    cMySql.execute("Select * from T_Pos order by keyword")
+    ks = cMySql.fetchall()
     for k in ks:
-        assettype   = k['assettype']
-        language    = k['language']
-        keyword     = k['keyword']
-        pos         = k['pos']
-        mypos       = k['mypos']
-        tipologia1  = k['tipologia1']
-        tipologia2  = k['tipologia2']
-        tipologia3  = k['tipologia3']
-        cucina1     = k['cucina1']
-        cucina2     = k['cucina2']
-        cucina3     = k['cucina3']
-        replacewith = k['replacewith']
+        assettype   = k['AssetType']
+        language    = k['Language']
+        keyword     = k['KeyWord']
+        pos         = k['Pos']
+        mypos       = k['MyPos']
+        tipologia1  = k['Tipologia1']
+        tipologia2  = k['Tipologia2']
+        tipologia3  = k['Tipologia3']
+        cucina1     = k['Cucina1']
+        cucina2     = k['Cucina2']
+        cucina3     = k['Cucina3']
+        replacewith = k['ReplaceWith']
         cLite.execute("insert into keywords (assettype, language, keyword, pos, mypos,tipologia1,tipologia2,replacewith,numwords) values (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                                             (assettype, language, keyword, pos, mypos,tipologia1,tipologia2,replacewith,numwords))
     return
 
 def ParseArgs():
-    testrun = debug = nomi = genera = False
+    testrun = debug = nomi = genera = trace = False
     Dsn = ''
     parser = argparse.ArgumentParser()
     parser.add_argument('-test', action='store_true', default=False,
@@ -151,6 +152,9 @@ def ParseArgs():
     parser.add_argument('-debug', action='store_true', default='',
                     dest='debug',
                     help="Dump tabelle interne su Db")
+    parser.add_argument('-trace', action='store_true', default='',
+                    dest='trace',
+                    help="Trace funzioni")
     parser.add_argument('-nomi', action='store_true', default='',
                     dest='nomi',
                     help="Semplifica i nomi degli asset")
@@ -169,6 +173,8 @@ def ParseArgs():
         print("RUN EFFETTIVO")
     if args.debug:
         debug = True
+    if args.trace:
+        trace= True
     if args.genera:
         genera = True
     if args.nomi:
@@ -176,14 +182,15 @@ def ParseArgs():
    
     Args = args
 
-    return testrun, Dsn, debug, genera, nomi
+    return testrun, Dsn, debug, genera, nomi, trace
 
 def RunIdCreate(RunType):
+    if trace: log(DEBUG)   
     try:
         runid = 0
-        cSql.execute("Insert into Run (Start, RunType) Values (?, ?)", (str(datetime.datetime.now().replace(microsecond = 0)), RunType))
-        cSql.execute("SELECT @@IDENTITY")  # recupera id autonum generato
-        run = cSql.fetchone()
+        cMsAcc.execute("Insert into Run (Start, RunType) Values (?, ?)", (str(datetime.datetime.now().replace(microsecond = 0)), RunType))
+        cMsAcc.execute("SELECT @@IDENTITY")  # recupera id autonum generato
+        run = cMsAcc.fetchone()
         if run is None:
             raise Exception("Get autonum generato con errore")
         runid = run[0]    
@@ -192,20 +199,20 @@ def RunIdCreate(RunType):
         return False
 
 def AssetTag(Asset, Ttag, tagname):
-     
+    if trace: log(DEBUG)   
     try:
         # cancella e riscrive la classificazione dell'asset     
         if len(Ttag)>0:
             Ttag = list(set(Ttag))     # rimuovo duplicati dalla lista        
-            #cSql.execute("Delete * from AssetTag where Asset = ? and TagName = ?", (Asset, tagname))
+            #cMsAcc.execute("Delete * from AssetTag where Asset = ? and TagName = ?", (Asset, tagname))
             for i in Ttag:
                 i = StdCar(i)
                 if len(i) < 2:
                     continue
-                cSql.execute("Select * from AssetTag where Asset=? and TagName=? and Tag=?", (Asset, tagname, i))
-                a = cSql.fetchone()
+                cMsAcc.execute("Select * from AssetTag where Asset=? and TagName=? and Tag=?", (Asset, tagname, i))
+                a = cMsAcc.fetchone()
                 if a is None:
-                    cSql.execute("Insert into AssetTag(Asset, TagName, Tag) Values (?, ?, ?)", (Asset, tagname, i))
+                    cMsAcc.execute("Insert into AssetTag(Asset, TagName, Tag) Values (?, ?, ?)", (Asset, tagname, i))
 
         return True
 
@@ -293,50 +300,70 @@ def log(level, *message):
             for line in stack_trace:
                 logging.error(line.replace("\n",""))
 
-def Genera_InsertWTag(nomeoriginale, keyword, lunghezza, tag):
-    cSql.execute("select * from W_Tag where nomeoriginale = ? and  keyword = ? and pos = ?", (nomeoriginale, keyword, tag))
-    a = cSql.fetchone()
-    if a is None:
-        # inserisce asset con info standardizzate     
-        cSql.execute("Insert into W_Tag (nomeoriginale, keyword, lunghezza, pos) values (?, ?, ?, ?)" , (nomeoriginale, keyword, lunghezza, tag))
-    return
+def Genera_InsertTPosFrasi(nomeoriginale, keyword, lunghezza, tag):
+    try:
+        if trace: log(DEBUG)   
+        cMySql.execute("select * from t_pos_frasi where nomeoriginale = %s and  frase = %s and pos = %s", (nomeoriginale, keyword, tag))
+        a = cMySql.fetchone()
+        if a is None:
+            # inserisce asset con info standardizzate     
+            cMySql.execute("Insert into t_pos_frasi (nomeoriginale, frase, lunghezza, pos) values (%s, %s, %s, %s)" , (nomeoriginale, keyword, lunghezza, tag))
+        return
+    except Exception as err:
+        log(ERROR, err)
+        return False
 
 def Genera_InsertTag(keyword, tag):
-    cSql.execute("select * from T_Tag where keyword = ?", ([keyword]))
-    a = cSql.fetchone()
-    if a is None:
-        # inserisce asset con info standardizzate     
-        cSql.execute("Insert into T_Tag (assettype, language, keyword, pos) values (?, ?,?,?)" , (1, 'ITA', keyword, tag))
+    try:
+        if trace: log(DEBUG)   
+        cMySql.execute("select * from T_Pos where keyword = %s", ([keyword]))
+        a = cMySql.fetchone()
+        if a is None:
+            # inserisce asset con info standardizzate     
+            cMySql.execute("Insert into T_Pos (assettype, language, keyword, pos) values (%s, %s,%s,%s)" , (1, 'ITA', keyword, tag))
+        return
+    except Exception as err:
+        log(ERROR, err)
+        return False
 
-    return
 
 
 def controlla(name, frasecompleta, lunghezza):
-
-    if len(name) == len(frasecompleta):
-        return False
-    if lunghezza > 6:
-        return True
-    # se ci sono queste parole, correggo
-    for w in frasecompleta.split():
-        if w.lower() == "&"         or \
-           w.lower() == "sas"       or \
-           w.lower() == "s.n.c."    or \
-           w.lower() == "snc"       or \
-           w.lower() == "srl"       or \
-           w.lower() == "s.r.l.":
-            return True
-        # se ci sono questi nomi non correggo
-        if w.lower() == "biancaneve"         or \
-           w.lower() == "castrocaro":         
+    try:
+        if trace: log(DEBUG)   
+        if len(name) == len(frasecompleta):
             return False
-    
-    return False
+        if lunghezza < 4:
+            return False
+        if lunghezza > 6:
+            return True
+        # se ci sono queste parole, correggo
+        for w in frasecompleta.split():
+            if w.lower() == "&"         or \
+               w.lower() == "sas"       or \
+               w.lower() == "c"         or \
+               w.lower() == "s.n.c."    or \
+               w.lower() == "snc"       or \
+               w.lower() == "srl"       or \
+               w.lower() == "s.r.l.":
+                return True
+            # se ci sono questi nomi non correggo
+            if w.lower() == "biancaneve"         or \
+               w.lower() == "castrocaro":         
+                return False
+        return False
+
+    except Exception as err:
+        log(ERROR, err)
+        return False
+
 
 
 def Names_Main():
+    
     # legge tutti i nomi ed e li semplifica 
     try:
+        if trace: log(DEBUG)   
         tagger = None
         RunId = RunIdCreate(me)
         rc = SetLogger(me, RunId, restart)      
@@ -354,8 +381,8 @@ def Names_Main():
         tagger = Names_LoadCustomTagging()
 
         # seleziono le righe da esaminare (aggiungere restart?)
-        cSql.execute("Select * from QAddress where NameDoNotTouch = ?", ([NO]))
-        rows = cSql.fetchall()
+        cMySql.execute("Select asset, name, assettype, country, countrylanguage from QAddress where NameDoNotTouch = 0")
+        rows = cMySql.fetchall()
         T_Ass = len(rows)
         msg=('RUN %s: NAMES, %s Assets' % (RunId, T_Ass))
         log(INFO, msg)
@@ -364,22 +391,24 @@ def Names_Main():
         for row in rows:
             Ttag = []
             cuc = []
-            asset = row['asset']
-            name = row['name']
-            assettype = row['assettype']
-            country = row['country']
-            lang = row['countrylanguage']
+            asset = row['Asset']
+            name = row['Name']
+            assettype = row['Assettype']
+            country = row['Country']
+            lang = row['CountryLanguage']
             simplename = Names_Change(tagger, asset, name, assettype, lang) 
             if not simplename:
-                return False
+               log(ERROR, "Errore in NamesChange" + name)
+               continue
             if simplename != name:
-               log(DEBUG, name+"---"+simplename)
-               cSql.execute("Update Asset set NameSimple = ?, NameSimplified = ? where Asset = ?", (simplename, YES, asset))
+               log(WARNING, name+"---"+simplename)
+               cMySql.execute("Update Asset set NameSimple = %s, NameSimplified = 1 where Asset = %s", (simplename, asset))
             N_Ass = N_Ass + 1
             bar.update(N_Ass)
         t2 = time.clock()
         print(round(t2-t1, 3))
         # chiudi DB
+        MsAcc.close()
         MySql.close()
         SqLite.close()
         bar.finish()
@@ -390,34 +419,35 @@ def Names_Main():
         return False
 
 def Names_LoadCustomTagging():    
-
+    if trace: log(DEBUG)   
     import nltk.tag, nltk.data
     model = {}
-    defaulW_Tagger = nltk.data.load(nltk.tag._POS_TAGGER)
-    cSql.execute("select * from T_Tag where  mypos <> ''")
-    rows = cSql.fetchall()
+    default_Wtagger = nltk.data.load(nltk.tag._POS_TAGGER)
+    cMySql.execute("select * from T_Pos where  mypos <> ''")
+    rows = cMySql.fetchall()
     for row in rows:
-        assettype   = row['assettype']
-        language    = row['language']
-        keyword     = row['keyword']
-        mypos       = row['mypos']
-        operatore   = row['operatore']
-        tipologia1  = row['tipologia1']
-        tipologia2  = row['tipologia2']
-        tipologia3  = row['tipologia3']
-        tipologia4  = row['tipologia4']
-        tipologia5  = row['tipologia5']
-        replacewith = row['replacewith']
+        assettype   = row['AssetType']
+        language    = row['Language']
+        keyword     = row['Keyword']
+        mypos       = row['MyPos']
+        operatore   = row['Operatore']
+        tipologia1  = row['Tipologia1']
+        tipologia2  = row['Tipologia2']
+        tipologia3  = row['Tipologia3']
+        tipologia4  = row['Tipologia4']
+        tipologia5  = row['Tipologia5']
+        replacewith = row['ReplaceWith']
         kwdnumwords = len(keyword.split())
 
         cLite.execute("insert into keywords (assettype, language, keyword, operatore,tipologia1,tipologia2,replacewith) values (?, ?, ?, ?, ?, ?, ?)",
                                             (assettype, language, keyword, operatore,tipologia1,tipologia2,replacewith))
         model[keyword] = mypos   # costruisci il tagger per classificare le parole da trattare
 
-    tagger = nltk.tag.UnigramTagger(model=model, backoff=defaulW_Tagger)
+    tagger = nltk.tag.UnigramTagger(model=model, backoff=default_W_Tagger)
     return tagger
 
 def Names_Stdze(name):
+    if trace: log(DEBUG)   
     try:
         #todelete = '!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~‘’“”–'
         todelete = '!"#$%()*+,-./:;<=>@[\\]^_`{|}~'
@@ -426,7 +456,7 @@ def Names_Stdze(name):
             if i not in todelete:
                 stdnam.append(i)
                 n = 1
-        if n > 0:
+
             newnam = "".join(stdnam)
         else:
             newnam = "-"
@@ -439,6 +469,7 @@ def Names_Stdze(name):
 
 
 def Names_Change(tagger, asset, name, assettype, lang):
+    if trace: log(DEBUG)   
     try:
         if len(name) == 0:
             return "-"
@@ -490,6 +521,8 @@ def Names_Change(tagger, asset, name, assettype, lang):
                 newname.append(word)  
         rc = AssetTag(asset, typ, "Tipologia")
         rc = AssetTag(asset, cuc, "Cucina")
+        if len(newname) == 0:
+            return "-"
         return " ".join(newname)
 
     except Exception as err:
@@ -497,9 +530,10 @@ def Names_Change(tagger, asset, name, assettype, lang):
         return False
 
 
-
 def Genera_ExtractName():
-    # legge tutti i nomi ed estrae tutte le keyword, le registra nella tabella T_Tag, che viene poi
+    if trace: log(DEBUG)   
+
+    # legge tutti i nomi ed estrae tutte le keyword, le registra nella tabella T_Pos, che viene poi
     # letta per trattare opportunamente i nomi
     # da eseguirsi una tantum
     try:
@@ -515,8 +549,10 @@ def Genera_ExtractName():
         rc = CreateMemTableKeywords()
         #rc = CopyKeywordsInMemory()
         # seleziono le righe da esaminare (aggiungere restart?)
-        cSql.execute("Select * from QAddress")
-        rows = cSql.fetchall()
+        msg=('RUN %s: NAMES, reading...' % (RunId))
+        log(INFO, msg)
+        cMySql.execute("Select * from QAddress where Asset < 10000")
+        rows = cMySql.fetchall()
         T_Ass = len(rows)
         msg=('RUN %s: NAMES, %s Assets' % (RunId, T_Ass))
         log(INFO, msg)
@@ -525,19 +561,19 @@ def Genera_ExtractName():
         for row in rows:
             Ttag = []
             cuc = []
-            asset = row['asset']
-            name = row['name']
-            namesimple = row['namesimple']
-            city = row['addrcity']
-            assettype = row['assettype']
-            country = row['country']
-            lang = row['countrylanguage']
-            fix = row['namedonottouch']
+            asset = row['Asset']
+            name = row['Name']
+            namesimple = row['NameSimple']
+            city = row['AddrCity']
+            assettype = row['AssetType']
+            country = row['Country']
+            lang = row['CountryLanguage']
+            fix = row['NameDoNotTouch']
             bar.update(N_Ass)
             if namesimple == None or namesimple == '' or namesimple.isspace(): # se simple e' vuoto ci copio il nome
                 simplename = name.title()
-                cSql.execute("Update Asset set NameSimple = ?, NameSimplified = ? where Asset = ?", (simplename, NO, asset))
-                cSql.commit()
+                cMySql.execute("Update Asset set NameSimple = %s, NameSimplified = %s where Asset = %s", (simplename, NO, asset))
+                
             if fix == 0: 
                 frase = []
                 ce = False
@@ -549,7 +585,7 @@ def Genera_ExtractName():
                 for word in s.words:
                     if word.string not in string.punctuation:
                         Genera_InsertTag(word.string, word.tag)
-                        cSql.commit()
+                        #cMySql.commit()
                 for sentence in s.sentences:
                     for chunk in sentence.pnp:   # prepositional noun phrase
                         ce = False
@@ -566,17 +602,18 @@ def Genera_ExtractName():
                                 cenomeproprio = False
                                 frasecompleta = ' '.join(frase)
                                 rc = controlla(name, frasecompleta, len(frase))
-                                Genera_InsertWTag(name, frasecompleta, len(frase), "YYY")  # inserisce la frase che potrebbe essere cancellata
-                                cSql.commit()
+                                if rc:  
+                                    # inserisce la frase che potrebbe essere cancellata
+                                    Genera_InsertTPosFrasi(name, frasecompleta, len(frase), "DEL")                                      
+                                    MySql.commit()
                             frase = []
                             ce = False
-
             N_Ass = N_Ass + 1
         t2 = time.clock()
         bar.finish()
         print(round(t2-t1, 3))
         # chiudi DB
-        MySql.close()
+        MsAcc.close()
         SqLite.close()
         return True
 
@@ -585,22 +622,22 @@ def Genera_ExtractName():
         return False
 
 def StdAsset(Asset, Mode):
-    if gL.trace: gL.log(gL.DEBUG)   
+    if trace: log(DEBUG)   
     try:
         t1 = time.clock()
         tabratio = []
         # il record corrente
-        gL.cSql.execute("select * from qaddress where asset =  ?", ([Asset]))
-        Curasset = gL.cSql.fetchone() 
+        cMsAcc.execute("select * from qaddress where asset =  ?", ([Asset]))
+        Curasset = cMsAcc.fetchone() 
         if not Curasset:
-            gL.log("ERROR", "Asset non trovato in tabella")
+            log("ERROR", "Asset non trovato in tabella")
             return False
         if Mode == "NEW":
-            if Curasset['aasset'] != 0:   # se e' gia'  stato battezzato non lo esamino di nuovo
-                return Asset, Curasset['aasset']
+            if Curasset['AAsset'] != 0:   # se e' gia'  stato battezzato non lo esamino di nuovo
+                return Asset, Curasset['AAsset']
             # tutti i record dello stesso tipo e paese ma differenti source, e che hanno gia  un asset di riferimento (aasset)
-        gL.cLite.execute("select * from MemAsset where Asset <> ? and Source <> ? and Country = ? and Assettype = ? and AAsset <> 0", (Asset, Curasset['source'], Curasset['country'], Curasset['assettype']))
-        rows  = gL.cLite.fetchall()     
+        cLite.execute("select * from MemAsset where Asset <> ? and Source <> ? and Country = ? and Assettype = ? and AAsset <> 0", (Asset, Curasset['source'], Curasset['country'], Curasset['assettype']))
+        rows  = cLite.fetchall()     
         if len(rows) == 0:   # non ce ne sono
             return 0,0   #inserisco l'asset corrente
 
@@ -724,11 +761,11 @@ def StdAsset(Asset, Mode):
             
         if len(tabratio) > 0:
             tabratio.sort(reverse=True, key=lambda tup: tup[0])
-            if gL.debug:
-                gL.DumpTabratio(tabratio)
+            if debug:
+                DumpTabratio(tabratio)
             if tabratio[0][0] > 400:   # global                
                 msg = ("[ASSET MATCH] [%s-%s] [%s-%s] [%s]" % (tabratio[0][3], tabratio[0][1], tabratio[0][4], tabratio[0][2], tabratio[0][0]))
-                gL.log(gL.WARNING, msg)
+                log(WARNING, msg)
                 t2 = time.clock()
                 print(round(t2-t1, 3))
                 return tabratio[0][3], tabratio[0][4]  # Asset, AAsset
@@ -737,7 +774,7 @@ def StdAsset(Asset, Mode):
         return 0,0
 
     except Exception as err:
-        gL.log(gL.ERROR, err)
+        log(ERROR, err)
         return False
 
 def Main():
@@ -753,13 +790,15 @@ def Main():
     return True
 
 if __name__ == "__main__":
-    global cSql, cLite, SqLite, MySql
-    testrun = Dsn = debug = nomi = genera = ''
-    testrun, Dsn, debug, genera, nomi = ParseArgs()
+    global cMsAcc, cLite, SqLite, MsAcc, cMySql, MySql
+    testrun = Dsn = debug = nomi = genera = trace = ''
+    testrun, Dsn, debug, genera, nomi, trace = ParseArgs()
 
     # apri connessione e cursori, carica keywords in memoria
-    MySql = pypyodbc.connect(Dsn)
-    cSql = MySql.cursor()
+    MsAcc  = pypyodbc.connect(Dsn)
+    cMsAcc = MsAcc.cursor()
+    MySql  = pymysql.connect(host='localhost', port=3306, user='root', passwd='', db='orange', use_unicode=True, charset='utf8')
+    cMySql = MySql.cursor(pymysql.cursors.DictCursor)
     SqLite = sqlite3.connect(':memory:')
     cLite = SqLite.cursor()
     rc = Main()
