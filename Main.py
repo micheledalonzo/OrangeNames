@@ -742,7 +742,7 @@ def Std_Main():
             N_Ass = N_Ass + 1
             Asset = row['Asset']
             
-            if row['Asset'] != 3351: continue
+            #if row['Asset'] != 3351: continue
             
             # "ALL" rifai tutti daccapo
             msg=('Asset %s - %s(%s)' % (Asset, N_Ass, T_Ass))
