@@ -209,14 +209,15 @@ def RunIdCreate(RunType):
     if trace: log(DEBUG)   
     try:
         runid = 0
-        cMsAcc.execute("Insert into Run (Start, RunType) Values (?, ?)", (str(datetime.datetime.now().replace(microsecond = 0)), RunType))
-        cMsAcc.execute("SELECT @@IDENTITY")  # recupera id autonum generato
-        run = cMsAcc.fetchone()
-        if run is None:
+        cMySql.execute("Insert into Run (Start, RunType) Values (%s, %s)", (str(datetime.datetime.now().replace(microsecond = 0)), RunType))
+        #cMySql.execute("SELECT @@IDENTITY")  # recupera id autonum generato
+        runid = cMySql.lastrowid
+        if runid is None:
             raise Exception("Get autonum generato con errore")
-        runid = run[0]    
+        #runid = run[0]    
         return runid
     except Exception as err:        
+        log(ERROR, err)
         return False
 
 def AssetTag(Asset, Ttag, tagname):
@@ -230,10 +231,10 @@ def AssetTag(Asset, Ttag, tagname):
                 i = StdCar(i)
                 if len(i) < 2:
                     continue
-                cMsAcc.execute("Select * from AssetTag where Asset=? and TagName=? and Tag=?", (Asset, tagname, i))
-                a = cMsAcc.fetchone()
+                cMyCql.execute("Select * from AssetTag where Asset=%s and TagName=%s and Tag=%s", (Asset, tagname, i))
+                a = cMyCql.fetchone()
                 if a is None:
-                    cMsAcc.execute("Insert into AssetTag(Asset, TagName, Tag) Values (?, ?, ?)", (Asset, tagname, i))
+                    cMyCql.execute("Insert into AssetTag(Asset, TagName, Tag) Values (%s, %s, %s)", (Asset, tagname, i))
 
         return True
 
@@ -426,6 +427,9 @@ def Names_Main():
             if simplename != name:
                log(WARNING, name+"---"+simplename)
                cMySql.execute("Update Asset set NameSimple = %s, NameSimplified = 1 where Asset = %s", (simplename, asset))
+               if debug: 
+                   Names_Dump(asset, name, simplename)
+                   cMsAcc.commit()
             N_Ass = N_Ass + 1
             bar.update(N_Ass)
         t2 = time.clock()
@@ -498,12 +502,26 @@ def Names_Stdze(name):
     try:
         #todelete = '!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~‘’“”–'
         todelete = '!"#$%()*+,-./:;<=>@[\\]^_`{|}~'
+        frstlst  = "\'"
         stdnam = []; n = 0; 
-        for i in name:
+
+        for idx, i in enumerate(name):
+            # se primo e ultimo carattere sono inutili li tolgo
+            #if name[0] in frtlst and name[len(stdnam)-1] in frtlst: 
+            #    if idx == 0: continue
+            #    if idx == len(name)-1: continue
             if i not in todelete:
                 stdnam.append(i)
-                n = 1
-        if n == 1:
+                n = 1                  
+        # se primo e ultimo carattere sono inutili li tolgo
+        while True:
+            if stdnam[0] in frstlst and stdnam[len(stdnam)-1] in frstlst: 
+                del stdnam[0]
+                del stdnam[len(stdnam)-1]
+            else:
+                break
+
+        if n == 1: 
             newnam = "".join(stdnam)
         else:
             newnam = "-"
@@ -532,7 +550,7 @@ def Names_Change(tagger, asset, name, assettype, lang):
         for idx, i in enumerate(n):
             word = i[0]
             ctag = i[1]
-            if idx == len(data_list) - 1 and ctag == 'CC':  # se l'ultima parola è una congiunzione non la copio
+            if idx == len(n) - 1 and ctag == 'CC':  # se l'ultima parola è una congiunzione non la copio
                 continue    
 
             if ctag == 'DEL' or ctag == 'RPL':
@@ -572,9 +590,6 @@ def Names_Change(tagger, asset, name, assettype, lang):
         rc = AssetTag(asset, cuc, "Cucina")
         if len(newname) == 0:
             return "-"
-
-        # se l'ultima  parola è una congiunzione la eliminto
-        t = nltk.word_tokenize(newname[len(a)-1])
 
         return " ".join(newname)
 
@@ -674,6 +689,20 @@ def Genera_ExtractName():
         log(ERROR, err)
         return False
 
+
+def Names_Dump(Asset, name, NameSimple):
+    if trace: log(DEBUG)   
+    try:
+        cMsAcc.execute("Delete from Debug_Names where Asset = ?", ([Asset]))             
+        cMsAcc.execute("Insert into Debug_Names(Asset, Name, Newname) \
+                         Values (?, ?, ?)", \
+                       ( Asset, name, NameSimple))
+    except Exception as err:
+        log(ERROR, err)
+        return False
+
+    return True
+
 def Std_DumpTabratio(tabratio):
     if trace: log(DEBUG)   
     if len(tabratio) == 0:
@@ -713,7 +742,7 @@ def Std_Main():
             N_Ass = N_Ass + 1
             Asset = row['Asset']
             
-            #if row['NameSimple'] != "Fuori Di Pizza": continue
+            if row['Asset'] != 3351: continue
             
             # "ALL" rifai tutti daccapo
             msg=('Asset %s - %s(%s)' % (Asset, N_Ass, T_Ass))
@@ -879,7 +908,7 @@ def Std_Asset(Curasset, Mode):
             msg = ("CHECK %s" % (check))                
             log(WARNING, msg)                
 
-            if check > 50:
+            if check > 0:
 
                 # peso i match 
                 namepeso = 2
@@ -902,6 +931,7 @@ def Std_Asset(Curasset, Mode):
             tabratio.sort(reverse=True, key=lambda tup: tup[0])
             if debug:
                 Std_DumpTabratio(tabratio)
+                cMsAcc.commit()
             if tabratio[0][0] > 400:   # global                
                 msg = ("[ASSET MATCH] [%s-%s] [%s-%s] [%s]" % (tabratio[0][3], tabratio[0][1], tabratio[0][4], tabratio[0][2], tabratio[0][0]))
                 log(WARNING, msg)
