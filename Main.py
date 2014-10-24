@@ -125,7 +125,7 @@ def Std_CopyAssetInMemory():
     try:
         log(INFO, "Loading assets....")
         cMySql.execute("Select * from QAddress order by Name")
-        #cMySql.execute("Select * from QAddress where asset > 4814 and asset < 5000 order by Name")
+        #cMySql.execute("Select * from QAddress order by Name")
         memassets = cMySql.fetchall()
         count = 0
         for asset in memassets:
@@ -734,11 +734,15 @@ def Std_Main():
         if not rc:
             raise Exception, "Non va"
         rc = Std_CopyAssetInMemory()
-        T_Ass = len(memassets)
+        cLite.execute("select * from MemAsset where AAsset <> 0")
+        todolist = cLite.fetchall()     
+        T_Ass = len(todolist)
         msg=('RUN %s: STDIZE %s Assets' % (RunId, T_Ass))
         log(INFO, msg)
         t1 = time.clock()
         for row in memassets:
+            if row['AAsset'] > 0:   # già battezzato
+                continue
             N_Ass = N_Ass + 1
             Asset = row['Asset']
             
