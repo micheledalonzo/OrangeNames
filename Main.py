@@ -16,6 +16,7 @@ import nltk
 from pattern.it import parse, split, parsetree
 from pattern.it import pprint
 from pattern.metrics import similarity, levenshtein
+import gc
 import time
 import logging
 import progressbar
@@ -32,7 +33,22 @@ WARN     = logging.WARN
 WARNING  = logging.WARNING
 NO = 0
 YES = -1
-DsnProd         = 'DSN=Orange'
+# leggo il file dei parametri
+f = open('c:\orange\orange.yaml')
+d = yaml.load(f)
+Prd_MsAccDsn = d['prd']['MsAccDsn']
+Prd_MySqlDb  = d['prd']['MySqlDb']
+Prd_MySqlSvr = d['prd']['MySqlSvr']
+Prd_MySqlUsr = d['prd']['MySqlUsr']
+Prd_MySqlPsw = d['prd']['MySqlPsw']
+Tst_MsAccDsn = d['tst']['MsAccDsn']
+Tst_MySqlDb  = d['tst']['MySqlDb']
+Tst_MySqlSvr = d['tst']['MySqlSvr']
+Tst_MySqlUsr = d['tst']['MySqlUsr']
+Tst_MySqlPsw = d['tst']['MySqlPsw']
+f.close()
+
+Prd_MsAccDsn         = 'DSN=Orange'
 restart         = False
 DsnTest         = 'DSN=OrangeTest'
 Dsn             = DsnTest
@@ -184,11 +200,11 @@ def ParseArgs():
     args = parser.parse_args()
     if args.test:
         testrun = True
-        Dsn = DsnTest
+        Dsn = Tst_MsAccDsn
         print("RUN DI TEST!!!!")
     else:
         testrun = False
-        Dsn = DsnProd
+        Dsn = Prd_MsAccDsn
         print("RUN EFFETTIVO")
     if args.std:
         std = True
@@ -761,6 +777,7 @@ def Std_Main():
             #gAsset = ParseGooglePlacesMain(Asset, AAsset)
             #if N_Ass > 100:
             #    break
+            gc.collect()
         # chiudi DB
         t2 = time.clock()
         print(round(t2-t1, 3))
@@ -981,12 +998,15 @@ def Main_OpenDb():
     global cMsAcc, cLite, SqLite, MsAcc, xMySql, cMySql, MySql
     try:
         # apri connessione e cursori
-        MsAcc  = pypyodbc.connect(Dsn)
+        if testrun:
+            MsAcc  = pypyodbc.connect(Tst_MsAccDsn)
+        else:
+            MsAcc  = pypyodbc.connect(Prd_MsAccDsn)
         cMsAcc = MsAcc.cursor()
         if testrun:
-            MySql  = pymysql.connect(host='localhost', port=3306, user='root', passwd='', db='orange', use_unicode=True, charset='utf8')
+            MySql  = pymysql.connect(host=Tst_MySqlSvr, port=3306, user=Tst_MySqlUsr, passwd=Tst_MySqlPsw, db=Tst_MySqlDb, use_unicode=True, charset='utf8')
         else:
-            MySql  = pymysql.connect(host='54.77.219.201', port=3306, user='orange', passwd='5Q34jMBDy88ec8dc', db='orange', use_unicode=True, charset='utf8')
+            MySql  = pymysql.connect(host=Prd_MySqlSvr, port=3306, user=Prd_MySqlUsr, passwd=Prd_MySqlPsw, db=Prd_MySqlDb, use_unicode=True, charset='utf8')
         MySql.autocommit(True)
         cMySql = MySql.cursor(pymysql.cursors.DictCursor)
         xMySql = MySql.cursor(pymysql.cursors.SSCursor)
