@@ -226,7 +226,7 @@ def AssetTag(Asset, Ttag, tagname):
         # cancella e riscrive la classificazione dell'asset     
         if len(Ttag)>0:
             Ttag = list(set(Ttag))     # rimuovo duplicati dalla lista        
-            #cMsAcc.execute("Delete * from AssetTag where Asset = ? and TagName = ?", (Asset, tagname))
+            
             for i in Ttag:
                 i = StdCar(i)
                 if len(i) < 2:
@@ -428,7 +428,7 @@ def Names_Main():
                log(WARNING, name+"---"+simplename)
                cMySql.execute("Update Asset set NameSimple = %s, NameSimplified = 1 where Asset = %s", (simplename, asset))
                if debug: 
-                   Names_Dump(asset, name, simplename)
+                   Names_Dump(asset, name, simplename)                   
                    cMsAcc.commit()
             N_Ass = N_Ass + 1
             bar.update(N_Ass)
