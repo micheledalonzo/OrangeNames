@@ -734,7 +734,7 @@ def Std_Main():
         if not rc:
             raise Exception, "Non va"
         rc = Std_CopyAssetInMemory()
-        cLite.execute("select * from MemAsset where AAsset <> 0")
+        cLite.execute("select * from MemAsset where AAsset = 0")
         todolist = cLite.fetchall()     
         T_Ass = len(todolist)
         msg=('RUN %s: STDIZE %s Assets' % (RunId, T_Ass))
