@@ -17,6 +17,7 @@ from pattern.it import parse, split, parsetree
 from pattern.it import pprint
 from pattern.metrics import similarity, levenshtein
 import gc
+import yaml
 import time
 import logging
 import progressbar
